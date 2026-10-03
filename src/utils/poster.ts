@@ -1,5 +1,6 @@
 import type { SongInfo } from "./song";
 import { artworkUrl, loadArtwork } from "./artwork";
+import { qrBox, QR_GAP, paintQrOnPoster } from "./qr";
 
 export const POSTER_W = 1080;
 export const POSTER_H = 1350;
@@ -13,6 +14,11 @@ const FADE_END = COVER_SIZE;
 const TEXT_TOP = 1060;
 const PAD_X = 72;
 const MAX_TEXT_W = POSTER_W - PAD_X * 2;
+
+/** Fresh random seed per render call (so "重新生成" varies the flow). */
+export function randomPosterSeed(): number {
+  return (Date.now() % 2147483647) ^ ((Math.random() * 0xffffffff) >>> 0);
+}
 
 function coverFit(
   img: HTMLImageElement,
@@ -227,7 +233,44 @@ function ellipsis(
   return `${s}…`;
 }
 
-function paintText(ctx: CanvasRenderingContext2D, song: SongInfo): void {
+const TITLE_FONT =
+  '-apple-system, "SF Pro Display", Inter, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+const BODY_FONT =
+  '-apple-system, "SF Pro Text", Inter, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+
+/**
+ * Fit a single-line label into maxW by shrinking the font first
+ * (keeps full text), falling back to ellipsis at the minimum size.
+ * The QR box occupies the bottom-right, so lines overlapping it get a
+ * narrower maxW instead of being drawn underneath the code.
+ */
+function fitLine(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  weight: number,
+  baseSize: number,
+  minSize: number,
+  family: string,
+  maxW: number
+): { font: string; out: string } {
+  const t = String(text ?? "");
+  let size = baseSize;
+  const fontFor = (s: number) => `${weight} ${s}px ${family}`;
+  ctx.font = fontFor(size);
+  while (size > minSize && ctx.measureText(t).width > maxW) {
+    size -= 2;
+    ctx.font = fontFor(size);
+  }
+  return { font: fontFor(size), out: ellipsis(ctx, t, maxW) };
+}
+
+function paintText(
+  ctx: CanvasRenderingContext2D,
+  song: SongInfo,
+  hasQr: boolean
+): void {
+  // When the QR plate is present, keep text clear of it.
+  const maxW = hasQr ? qrBox().x - QR_GAP - PAD_X : MAX_TEXT_W;
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   ctx.shadowColor = "rgba(0,0,0,0.4)";
@@ -237,22 +280,22 @@ function paintText(ctx: CanvasRenderingContext2D, song: SongInfo): void {
   let y = TEXT_TOP + 60;
 
   ctx.fillStyle = "#ffffff";
-  ctx.font =
-    '700 76px -apple-system, "SF Pro Display", Inter, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
-  ctx.fillText(ellipsis(ctx, song.title, MAX_TEXT_W), PAD_X, y);
+  const title = fitLine(ctx, song.title, 700, 76, 44, TITLE_FONT, maxW);
+  ctx.font = title.font;
+  ctx.fillText(title.out, PAD_X, y);
 
   y += 64;
   ctx.fillStyle = "rgba(255,255,255,0.88)";
-  ctx.font =
-    '500 44px -apple-system, "SF Pro Text", Inter, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
-  ctx.fillText(ellipsis(ctx, song.artist, MAX_TEXT_W), PAD_X, y);
+  const artist = fitLine(ctx, song.artist, 500, 44, 30, BODY_FONT, maxW);
+  ctx.font = artist.font;
+  ctx.fillText(artist.out, PAD_X, y);
 
   if (song.album) {
     y += 52;
     ctx.fillStyle = "rgba(255,255,255,0.72)";
-    ctx.font =
-      '400 36px -apple-system, "SF Pro Text", Inter, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
-    ctx.fillText(ellipsis(ctx, song.album, MAX_TEXT_W), PAD_X, y);
+    const album = fitLine(ctx, song.album, 400, 36, 26, BODY_FONT, maxW);
+    ctx.font = album.font;
+    ctx.fillText(album.out, PAD_X, y);
   }
 
   ctx.shadowColor = "transparent";
@@ -283,8 +326,14 @@ function paintPlaceholderCover(ctx: CanvasRenderingContext2D): void {
  * Render the 1080x1350 poster.
  * Missing/unreachable artwork falls back to a neutral placeholder cover —
  * generation never hangs or throws on artwork alone.
+ * When `opts.qrText` is non-empty, a visible QR plate is painted at the
+ * bottom-right corner and the text lines shrink to stay clear of it.
+ * Pass a fixed `opts.seed` to re-render the identical flow (re-pick path).
  */
-export async function renderPoster(song: SongInfo): Promise<HTMLCanvasElement> {
+export async function renderPoster(
+  song: SongInfo,
+  opts: { qrText?: string; seed?: number } = {}
+): Promise<HTMLCanvasElement> {
   const canvas = document.createElement("canvas");
   canvas.width = POSTER_W;
   canvas.height = POSTER_H;
@@ -302,9 +351,9 @@ export async function renderPoster(song: SongInfo): Promise<HTMLCanvasElement> {
   }
 
   if (img) {
-    // Fresh random seed per render: "重新生成" gives a new flow each time.
-    const seed =
-      (Date.now() % 2147483647) ^ ((Math.random() * 0xffffffff) >>> 0);
+    // Fixed seed when provided (re-pick re-render); otherwise fresh random
+    // seed per render so "重新生成" gives a new flow each time.
+    const seed = opts.seed ?? randomPosterSeed();
     // 1) blurred cover fills everything = the flow (remixed per render)
     paintFlowingBackdrop(ctx, img, seed);
 
@@ -320,8 +369,10 @@ export async function renderPoster(song: SongInfo): Promise<HTMLCanvasElement> {
   // 3) one feathered shade behind the text (transparent at the top edge)
   paintLegibility(ctx);
 
-  // 4) title / artist / album
-  paintText(ctx, song);
+  // 4) QR plate first so text can reserve its space, 5) title / artist / album
+  const qrText = opts.qrText ?? "";
+  const hasQr = Boolean(qrText) && paintQrOnPoster(canvas, qrText);
+  paintText(ctx, song, hasQr);
 
   return canvas;
 }

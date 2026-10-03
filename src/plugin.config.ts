@@ -8,7 +8,7 @@ export default {
     ce_prefix: 'share-poster',
     identifier: 'cider.share-poster',
     name: 'Share Poster',
-    description: 'Generate an Apple-style song poster (flowing artwork) and copy PNG to clipboard from Share menus.',
+    description: 'Apple-style song poster with inline KuGou match and scannable QR plate. No dialogs.',
     version: '0.1.0',
     author: 'you',
     repo: 'https://github.com/ciderapp/plugin-template',

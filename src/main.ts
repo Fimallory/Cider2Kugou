@@ -9,12 +9,10 @@ import {
   addCustomButton,
   createModal,
   AppleMusic,
-  DialogAPI,
 } from "@ciderapp/pluginkit";
 import SharePosterModal from "./components/SharePosterModal.vue";
-import KugouOpenModal from "./components/KugouOpenModal.vue";
 import PluginConfig from "./plugin.config";
-import { resolveSongForShare, armMenuAnchorTracking } from "./utils/song";
+import { armMenuAnchorTracking } from "./utils/song";
 
 /**
  * Initializing a Vue app instance so we can use things like Pinia.
@@ -39,24 +37,14 @@ export const CustomElements = {
     shadowRoot: false,
     configureApp,
   }),
-  "kugou-open-modal": defineCustomElement(KugouOpenModal, {
-    shadowRoot: false,
-    configureApp,
-  }),
 };
 
 /**
  * Open the poster modal for a raw host song object.
  * Resolution order (inside the modal): host item -> DOM scrape -> now playing.
+ * No alerts: unreadable songs surface as an inline error inside the modal.
  */
 function openSharePoster(source: unknown) {
-  if (!resolveSongForShare(source)) {
-    void DialogAPI.createAlert(
-      "无法读取这首歌曲的信息。请先播放一首歌，或在歌曲行上右键后重试。",
-      "分享"
-    );
-    return;
-  }
   const { openDialog, closeDialog, dialogElement } = createModal({
     escClose: true,
   });
@@ -65,31 +53,6 @@ function openSharePoster(source: unknown) {
   (content as unknown as { source: unknown }).source = source;
   dialogElement.appendChild(content);
   // Close on backdrop click for convenience (keep escClose too).
-  dialogElement.addEventListener("click", (e) => {
-    if (e.target === dialogElement) closeDialog();
-  });
-  openDialog();
-}
-
-/**
- * Open the KuGou modal for a raw host song object.
- * Same song-resolution chain as the poster flow; the modal then
- * searches KuGou, fuzzy-matches, and offers android->pc->web launch.
- */
-function openKugou(source: unknown) {
-  if (!resolveSongForShare(source)) {
-    void DialogAPI.createAlert(
-      "无法读取这首歌曲的信息。请先播放一首歌，或在歌曲行上右键后重试。",
-      "在酷狗中打开"
-    );
-    return;
-  }
-  const { openDialog, closeDialog, dialogElement } = createModal({
-    escClose: true,
-  });
-  const content = document.createElement(customElementName("kugou-open-modal"));
-  (content as unknown as { source: unknown }).source = source;
-  dialogElement.appendChild(content);
   dialogElement.addEventListener("click", (e) => {
     if (e.target === dialogElement) closeDialog();
   });
@@ -125,17 +88,11 @@ const { plugin, setupConfig, customElementName, useCPlugin } =
       // even when the host passes a MenuItem descriptor instead of song data.
       armMenuAnchorTracking();
 
-      // 1) Media item context menu (right-click a song) — primary entry.
+      // 1) Media item context menu (right-click a song) — single merged entry.
       addMediaItemContextMenuEntry({
         label: "分享歌曲海报",
         onClick(item) {
           openSharePoster(item ?? nowPlayingSource());
-        },
-      });
-      addMediaItemContextMenuEntry({
-        label: "在酷狗中打开",
-        onClick(item) {
-          openKugou(item ?? nowPlayingSource());
         },
       });
 
@@ -146,24 +103,12 @@ const { plugin, setupConfig, customElementName, useCPlugin } =
           openSharePoster(nowPlayingSource());
         },
       });
-      addImmersiveMenuEntry({
-        label: "在酷狗中打开",
-        onClick() {
-          openKugou(nowPlayingSource());
-        },
-      });
 
       // 3) Main menu — shares the current song.
       addMainMenuEntry({
         label: "分享歌曲海报",
         onClick() {
           openSharePoster(nowPlayingSource());
-        },
-      });
-      addMainMenuEntry({
-        label: "在酷狗中打开",
-        onClick() {
-          openKugou(nowPlayingSource());
         },
       });
 
@@ -174,14 +119,6 @@ const { plugin, setupConfig, customElementName, useCPlugin } =
         title: "分享歌曲海报",
         onClick() {
           openSharePoster(nowPlayingSource());
-        },
-      });
-      addCustomButton({
-        element: "♪K",
-        location: "chrome-top/right",
-        title: "在酷狗中打开",
-        onClick() {
-          openKugou(nowPlayingSource());
         },
       });
     },

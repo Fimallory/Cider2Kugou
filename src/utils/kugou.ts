@@ -1,5 +1,5 @@
 /**
- * KuGou search + launch-link layer.
+ * KuGou search + fuzzy-match layer for the merged poster flow.
  *
  * Search sources (in priority order, first success wins):
  *  1. `songsearch.kugou.com/song_search_v2` — HTTPS works, no CORS ACAO header
@@ -7,20 +7,16 @@
  *  2. `msearchcdn.kugou.com/api/v3/search/song` / `mobilecdn...` — HTTP-only,
  *     cert mismatch over HTTPS; reachable via plain HTTP from browser context.
  *
- * Launch links (priority: android -> pc -> web, per user choice):
- *  - android: `intent://www.kugou.com/song/#hash=..&album_id=..`
- *    `#Intent;package=com.kugou.android;scheme=https;end` — Chrome on Android
- *    routes it to the installed KuGou app when present.
- *  - pc: `https://www.kugou.com/song/#hash=..&album_id=..` opened via
- *    `window.open` (Cider is an Electron shell; no `kugou://` protocol is
- *    registered on stock Windows installs — verified via HKCR scan).
- *  - web fallback: keyword search page
- *    `https://www.kugou.com/yy/html/search.html#searchType=song&searchKeyWord=..`
+ * The merged SharePosterModal auto-matches above AUTO_MATCH_THRESHOLD,
+ * otherwise shows the ranked list inline; the picked candidate's official
+ * H5 share URL is painted as a visible QR plate at the poster's bottom-right.
  */
 
 export interface KugouCandidate {
   hash: string;
   albumId: string;
+  /** 数字音频 id（v2 MixSongID/ID，v3 album_audio_id），H5 分享页传歌用。 */
+  albumAudioId: string;
   songName: string;
   singerName: string;
   albumName: string;
@@ -29,17 +25,6 @@ export interface KugouCandidate {
   score: number;
   /** Which search source produced this candidate. */
   source: string;
-  /** Direct PC/web play page for this exact track. */
-  playUrl: string;
-}
-
-export interface KugouLaunchLinks {
-  /** Exact-track page (PC client takeover when installed, else web play). */
-  playUrl: string;
-  /** Android Chrome intent link (app when installed, else browser fallback). */
-  androidIntent: string;
-  /** Keyword search page fallback (no hash needed). */
-  searchUrl: string;
 }
 
 const SEARCH_TIMEOUT_MS = 12_000;
@@ -79,6 +64,8 @@ async function fetchJson(url: string): Promise<unknown> {
 interface V2Item {
   FileHash?: string;
   AlbumID?: string;
+  MixSongID?: string;
+  ID?: string;
   SongName?: string;
   SingerName?: string;
   AlbumName?: string;
@@ -88,6 +75,8 @@ interface V2Item {
 interface V3Item {
   hash?: string;
   album_id?: string;
+  album_audio_id?: string;
+  audio_id?: string;
   songname?: string;
   singername?: string;
   album_name?: string;
@@ -103,13 +92,13 @@ function fromV2(lists: V2Item[], source: string): KugouCandidate[] {
     out.push({
       hash,
       albumId,
+      albumAudioId: String(it.MixSongID ?? it.ID ?? "").trim(),
       songName: String(it.SongName ?? ""),
       singerName: String(it.SingerName ?? ""),
       albumName: String(it.AlbumName ?? ""),
       duration: Number(it.Duration ?? 0) || 0,
       score: 0,
       source,
-      playUrl: playUrl(hash, albumId),
     });
   }
   return out;
@@ -124,13 +113,13 @@ function fromV3(info: V3Item[], source: string): KugouCandidate[] {
     out.push({
       hash,
       albumId,
+      albumAudioId: String(it.album_audio_id ?? it.audio_id ?? "").trim(),
       songName: String(it.songname ?? ""),
       singerName: String(it.singername ?? ""),
       albumName: String(it.album_name ?? ""),
       duration: Number(it.duration ?? 0) || 0,
       score: 0,
       source,
-      playUrl: playUrl(hash, albumId),
     });
   }
   return out;
@@ -294,70 +283,30 @@ export function rankKugou(
     .sort((a, b) => b.score - a.score);
 }
 
-/** Above this score the best hit auto-launches without asking. */
+/** Above this score the best hit auto-matches for poster embedding. */
 export const AUTO_MATCH_THRESHOLD = 0.82;
 
 // ---------------------------------------------------------------------------
-// Launch links: android -> pc -> web
+// Official H5 share URL builder (QR payload; no launch/copy UI).
+//
+// Phones open the QR with any scanner (system camera, QQ, WeChat): a plain
+// https URL always opens, then the official H5 page's own JS
+// (open-kugou-app) wakes the KuGou app when installed, download page when
+// not. This is the user-supplied flow: `m.kugou.com/share/song.html?chain=`
+// (登录态 short code, not generatable here) — without a chain the page
+// still accepts direct song params (`hash` + `album_id` + `album_audio_id`,
+// read by index_single_v2 via Kg.request.search; verified 200 + song data
+// via get_song_info_v2 with the same params).
 // ---------------------------------------------------------------------------
 
-export function playUrl(hash: string, albumId: string): string {
-  return `https://www.kugou.com/song/#hash=${hash}&album_id=${albumId}`;
-}
-
-export function androidIntentUrl(hash: string, albumId: string): string {
-  return (
-    `intent://www.kugou.com/song/#hash=${hash}&album_id=${albumId}` +
-    `#Intent;package=com.kugou.android;scheme=https;end`
-  );
-}
-
-export function webSearchUrl(title: string, artist: string): string {
-  const kw = [title, artist].filter(Boolean).join(" ").trim();
-  return (
-    `https://www.kugou.com/yy/html/search.html` +
-    `#searchType=song&searchKeyWord=${encodeURIComponent(kw)}`
-  );
-}
-
-export function buildLaunchLinks(
-  c: Pick<KugouCandidate, "hash" | "albumId">,
-  title: string,
-  artist: string
-): KugouLaunchLinks {
-  return {
-    playUrl: playUrl(c.hash, c.albumId),
-    androidIntent: androidIntentUrl(c.hash, c.albumId),
-    searchUrl: webSearchUrl(title, artist),
-  };
-}
-
-/**
- * Open a link from inside the Cider/Electron shell.
- * `window.open(url, "_blank")` lets the host shell route https to the OS
- * default browser (which then takes over to the KuGou PC client when the
- * web page triggers it, or just plays on web).
- */
-export function openExternal(url: string): void {
-  window.open(url, "_blank", "noopener");
-}
-
-export function copyText(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
-  return new Promise<void>((resolve, reject) => {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      ta.remove();
-      if (ok) resolve();
-      else reject(new Error("copy failed"));
-    } catch (e) {
-      reject(e instanceof Error ? e : new Error("copy failed"));
-    }
+export function shareUrl(
+  c: Pick<KugouCandidate, "hash" | "albumId" | "albumAudioId">
+): string {
+  const q = new URLSearchParams({
+    hash: String(c.hash ?? "").trim().toLowerCase(),
+    album_id: String(c.albumId ?? "").trim(),
   });
+  const audioId = String(c.albumAudioId ?? "").trim();
+  if (audioId) q.set("album_audio_id", audioId);
+  return `https://m.kugou.com/share/song.html?${q.toString()}`;
 }
