@@ -15,8 +15,10 @@
 export interface KugouCandidate {
   hash: string;
   albumId: string;
-  /** 数字音频 id（v2 MixSongID/ID，v3 album_audio_id），H5 分享页传歌用。 */
+  /** 数字音频 id（v2 MixSongID/ID，v3 album_audio_id），短链与 H5 传歌用。 */
   albumAudioId: string;
+  /** mixsong 短码（encode_album_audio_id，登录态 songinfo 换得），无则回退。 */
+  encodeId: string;
   songName: string;
   singerName: string;
   albumName: string;
@@ -93,6 +95,7 @@ function fromV2(lists: V2Item[], source: string): KugouCandidate[] {
       hash,
       albumId,
       albumAudioId: String(it.MixSongID ?? it.ID ?? "").trim(),
+      encodeId: "",
       songName: String(it.SongName ?? ""),
       singerName: String(it.SingerName ?? ""),
       albumName: String(it.AlbumName ?? ""),
@@ -114,6 +117,7 @@ function fromV3(info: V3Item[], source: string): KugouCandidate[] {
       hash,
       albumId,
       albumAudioId: String(it.album_audio_id ?? it.audio_id ?? "").trim(),
+      encodeId: "",
       songName: String(it.songname ?? ""),
       singerName: String(it.singername ?? ""),
       albumName: String(it.album_name ?? ""),
@@ -287,18 +291,25 @@ export function rankKugou(
 export const AUTO_MATCH_THRESHOLD = 0.82;
 
 // ---------------------------------------------------------------------------
-// Official H5 share URL builder (QR payload; no launch/copy UI).
+// Official short-link share URL builder (QR payload; no launch/copy UI).
 //
 // Phones open the QR with any scanner (system camera, QQ, WeChat): a plain
-// https URL always opens, then the official H5 page's own JS
-// (open-kugou-app) wakes the KuGou app when installed, download page when
-// not. This is the user-supplied flow: `m.kugou.com/share/song.html?chain=`
-// (登录态 short code, not generatable here) — without a chain the page
-// still accepts direct song params (`hash` + `album_id` + `album_audio_id`,
-// read by index_single_v2 via Kg.request.search; verified 200 + song data
-// via get_song_info_v2 with the same params).
+// https URL always opens, then the official page's own JS (open-kugou-app)
+// wakes the KuGou app when installed, download page when not.
+//
+// Primary: `https://www.kugou.com/mixsong/<encode>.html` — the official
+// mobile share page. `<encode>` is `encode_album_audio_id` from the
+// login-state songinfo API (verified 200 + song_info, 2026-10-03).
+// Fallback (no cookie/encode): `m.kugou.com/share/song.html?hash=..` —
+// opens the generic H5 shell without song data.
 // ---------------------------------------------------------------------------
 
+/** mixsong 短链（官方分享页，需 encode_album_audio_id）。 */
+export function mixsongUrl(encodeId: string): string {
+  return `https://www.kugou.com/mixsong/${encodeId}.html`;
+}
+
+/** 通用 H5 页（无短链时的回退，无歌曲数据但页面可开）。 */
 export function shareUrl(
   c: Pick<KugouCandidate, "hash" | "albumId" | "albumAudioId">
 ): string {

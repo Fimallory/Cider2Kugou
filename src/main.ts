@@ -11,6 +11,7 @@ import {
   AppleMusic,
 } from "@ciderapp/pluginkit";
 import SharePosterModal from "./components/SharePosterModal.vue";
+import PluginSettings from "./components/PluginSettings.vue";
 import PluginConfig from "./plugin.config";
 import { armMenuAnchorTracking } from "./utils/song";
 
@@ -34,6 +35,10 @@ export const CustomElements = {
     /**
      * Disabling the shadow root DOM so that we can inject styles from the DOM
      */
+    shadowRoot: false,
+    configureApp,
+  }),
+  settings: defineCustomElement(PluginSettings, {
     shadowRoot: false,
     configureApp,
   }),
@@ -75,6 +80,7 @@ const { plugin, setupConfig, customElementName, useCPlugin } =
   definePluginContext({
     ...PluginConfig,
     CustomElements,
+    SettingsElement: `${PluginConfig.ce_prefix}-settings`,
     setup() {
       /**
        * Registering the custom elements in the app
@@ -125,11 +131,18 @@ const { plugin, setupConfig, customElementName, useCPlugin } =
   });
 
 /**
- * No user-facing settings (zero-config per spec).
+ * Plugin settings. `kugouCookie` is the user's own login cookie pasted in
+ * the settings page — persisted by Cider, never committed to git.
  */
-export const cfg = setupConfig({});
+export interface PluginSettings {
+  kugouCookie: string;
+}
 
-export function useConfig() {
+export const cfg = setupConfig<PluginSettings>({
+  kugouCookie: "",
+});
+
+export function useConfig(): PluginSettings {
   return cfg.value;
 }
 

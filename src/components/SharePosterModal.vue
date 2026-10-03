@@ -14,10 +14,12 @@ import {
 import {
   searchKugou,
   rankKugou,
+  mixsongUrl,
   shareUrl,
   AUTO_MATCH_THRESHOLD,
   type KugouCandidate,
 } from "../utils/kugou";
+import { fetchEncodeId } from "../utils/shortlink";
 
 const props = defineProps<{
   /** Raw host item (right-click target) or now-playing object. */
@@ -80,9 +82,19 @@ function fmtDur(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-/** picked candidate -> QR text (official H5 share page), "" when none. */
+/** picked candidate -> QR text. Short mixsong link when resolved, else generic H5. */
 function qrTextFor(c: KugouCandidate | null): string {
-  return c ? shareUrl(c) : "";
+  if (!c) return "";
+  if (c.encodeId) return mixsongUrl(c.encodeId);
+  return shareUrl(c);
+}
+
+/** Resolve the mixsong short code for the picked candidate (silent fallback). */
+async function resolveShortLink(c: KugouCandidate): Promise<string> {
+  if (!c || c.encodeId) return c?.encodeId ?? "";
+  const code = await fetchEncodeId(c.hash);
+  if (code) c.encodeId = code;
+  return code;
 }
 
 async function loadKugou(song: SongInfo): Promise<void> {
@@ -141,6 +153,7 @@ async function generate(): Promise<void> {
     const kgPromise = loadKugou(song);
     lastSeed = randomPosterSeed();
     await kgPromise;
+    if (picked.value) await resolveShortLink(picked.value);
     const canvas = await renderPoster(song, {
       qrText: qrTextFor(picked.value),
       seed: lastSeed,
@@ -163,6 +176,7 @@ async function select(c: KugouCandidate): Promise<void> {
   if (!lastSong) return;
   status.value = "working";
   try {
+    await resolveShortLink(c);
     const canvas = await renderPoster(lastSong, {
       qrText: qrTextFor(c),
       seed: lastSeed,

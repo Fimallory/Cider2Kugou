@@ -12,7 +12,8 @@ Cider 插件：把当前歌曲做成一张 Apple 风格竖版海报（1080×1350
 - 海报：封面羽化溶解 + 模糊 flow 背景（Spicetify full-screen 式：整封面 cover 铺满，高斯模糊 + 压暗 + 饱和度提升）
 - Flow 随机化：底层取景滑动 ±6%，下半区由封面底部切片镜像 / 错位 / 微旋转重组后再模糊；点「重新生成」每次结果不同
 - 酷狗匹配：生成时并发搜索酷狗并模糊打分；高分自动匹配，低分在海报页下方展开候选列表供点选；点选后从原图重新嵌入，无损重选
-- 酷狗二维码：匹配命中的歌曲以官方 H5 分享页直链（`https://m.kugou.com/share/song.html?hash=..&album_id=..&album_audio_id=..`）画成正常二维码在海报右下角（220px 白底，M 纠错；手机任意扫码（相机/QQ/微信）都能打开，页面自带官方唤起逻辑拉起酷狗 App）；无匹配时不画码；标题 / 歌手 / 专辑过长时先缩小字号再省略，保证不压到二维码；复制按钮成功变 ✓（0.5s 后恢复）、失败变 ✗，无任何弹窗
+- 酷狗二维码：匹配命中的歌曲以官方 mixsong 短链（`https://www.kugou.com/mixsong/<encode>.html`，需在插件设置页粘贴酷狗登录 Cookie 兑换；已验证 `喜欢你→gr4tu0a`、`你好吗→fq84v5d9`，200 + song_info）画成正常二维码在海报右下角（220px 白底，M 纠错；手机任意扫码（相机/QQ/微信）都能打开，页面自带官方唤起逻辑拉起酷狗 App）；无 Cookie / 兑换失败时静默回退为通用 H5 页（`m.kugou.com/share/song.html?hash=..`）；无匹配时不画码；标题 / 歌手 / 专辑过长时先缩小字号再省略，保证不压到二维码；复制按钮成功变 ✓（0.5s 后恢复）、失败变 ✗，无任何弹窗
+- 插件设置：设置页粘贴 `m.kugou.com` 登录 Cookie（`t` + `KugooID` 必需），附一键验证（用已知歌曲换短码）；只存本机 Cider 配置，不进代码仓库；过期后重新粘贴即可
 - 复制：PNG 位图写入系统剪贴板；剪贴板不可用时自动降级为下载 PNG（全程静默，无提示弹窗）
 - 无封面兜底：列表行 / 电台等拿不到封面时画深灰占位封面，流程不卡死；v3 请求与图片加载全链路超时
 - 无匹配兜底：酷狗搜不到时显示「酷狗无匹配」，海报照常生成，仅不嵌入
@@ -42,7 +43,10 @@ npm run build    # vue-tsc + vite build，产物 dist/plugin.js + dist/plugin.ym
 - `src/utils/artwork.ts` — 封面 URL 展开 / CORS 加载 / v3 详情补全（library + catalog 双路由）
 - `src/utils/poster.ts` — Canvas 海报绘制 + 剪贴板导出
 - `src/utils/qr.ts` — 右下角二维码绘制
-- `src/utils/kugou.ts` — 酷狗搜索 + 模糊匹配 + 播放页链接构造
+- `src/utils/kugou.ts` — 酷狗搜索 + 模糊匹配 + 短链/H5 链接构造
+- `src/utils/shortlink.ts` — 登录态 songinfo 换 `encode_album_audio_id`（自带 MD5 签名）
+- `src/utils/md5.ts` — 最小 MD5 实现（与 node:crypto 对照验证一致）
+- `src/components/PluginSettings.vue` — 插件设置页（Cookie 粘贴 + 一键验证）
 
 ## Preparing a ZIP package for the Cider Marketplace
 
