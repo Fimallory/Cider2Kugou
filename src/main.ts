@@ -12,6 +12,7 @@ import {
   DialogAPI,
 } from "@ciderapp/pluginkit";
 import SharePosterModal from "./components/SharePosterModal.vue";
+import KugouOpenModal from "./components/KugouOpenModal.vue";
 import PluginConfig from "./plugin.config";
 import { resolveSongForShare, armMenuAnchorTracking } from "./utils/song";
 
@@ -38,6 +39,10 @@ export const CustomElements = {
     shadowRoot: false,
     configureApp,
   }),
+  "kugou-open-modal": defineCustomElement(KugouOpenModal, {
+    shadowRoot: false,
+    configureApp,
+  }),
 };
 
 /**
@@ -60,6 +65,31 @@ function openSharePoster(source: unknown) {
   (content as unknown as { source: unknown }).source = source;
   dialogElement.appendChild(content);
   // Close on backdrop click for convenience (keep escClose too).
+  dialogElement.addEventListener("click", (e) => {
+    if (e.target === dialogElement) closeDialog();
+  });
+  openDialog();
+}
+
+/**
+ * Open the KuGou modal for a raw host song object.
+ * Same song-resolution chain as the poster flow; the modal then
+ * searches KuGou, fuzzy-matches, and offers android->pc->web launch.
+ */
+function openKugou(source: unknown) {
+  if (!resolveSongForShare(source)) {
+    void DialogAPI.createAlert(
+      "无法读取这首歌曲的信息。请先播放一首歌，或在歌曲行上右键后重试。",
+      "在酷狗中打开"
+    );
+    return;
+  }
+  const { openDialog, closeDialog, dialogElement } = createModal({
+    escClose: true,
+  });
+  const content = document.createElement(customElementName("kugou-open-modal"));
+  (content as unknown as { source: unknown }).source = source;
+  dialogElement.appendChild(content);
   dialogElement.addEventListener("click", (e) => {
     if (e.target === dialogElement) closeDialog();
   });
@@ -102,12 +132,24 @@ const { plugin, setupConfig, customElementName, useCPlugin } =
           openSharePoster(item ?? nowPlayingSource());
         },
       });
+      addMediaItemContextMenuEntry({
+        label: "在酷狗中打开",
+        onClick(item) {
+          openKugou(item ?? nowPlayingSource());
+        },
+      });
 
       // 2) Immersive player menu — shares the current song.
       addImmersiveMenuEntry({
         label: "分享歌曲海报",
         onClick() {
           openSharePoster(nowPlayingSource());
+        },
+      });
+      addImmersiveMenuEntry({
+        label: "在酷狗中打开",
+        onClick() {
+          openKugou(nowPlayingSource());
         },
       });
 
@@ -118,6 +160,12 @@ const { plugin, setupConfig, customElementName, useCPlugin } =
           openSharePoster(nowPlayingSource());
         },
       });
+      addMainMenuEntry({
+        label: "在酷狗中打开",
+        onClick() {
+          openKugou(nowPlayingSource());
+        },
+      });
 
       // 4) Top chrome button — quick access to the current song.
       addCustomButton({
@@ -126,6 +174,14 @@ const { plugin, setupConfig, customElementName, useCPlugin } =
         title: "分享歌曲海报",
         onClick() {
           openSharePoster(nowPlayingSource());
+        },
+      });
+      addCustomButton({
+        element: "♪K",
+        location: "chrome-top/right",
+        title: "在酷狗中打开",
+        onClick() {
+          openKugou(nowPlayingSource());
         },
       });
     },
