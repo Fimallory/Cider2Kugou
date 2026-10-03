@@ -6,19 +6,14 @@ import {
   addMainMenuEntry,
   addMediaItemContextMenuEntry,
   addImmersiveMenuEntry,
-  addImmersiveLayout,
   addCustomButton,
   createModal,
-  useCiderAudio,
+  AppleMusic,
+  DialogAPI,
 } from "@ciderapp/pluginkit";
-import HelloWorld from "./components/HelloWorld.vue";
-import MySettings from "./components/MySettings.vue";
-import ModalExample from "./components/ModalExample.vue";
-import CustomImmersiveLayout from "./components/CustomImmersiveLayout.vue";
-import CustomPage from "./pages/CustomPage.vue";
+import SharePosterModal from "./components/SharePosterModal.vue";
 import PluginConfig from "./plugin.config";
-import ComponentBasedModal from "./components/ComponentBasedModal.vue";
-import ComponentsShowcase from "./pages/ComponentsShowcase.vue";
+import { resolveSongForShare, armMenuAnchorTracking } from "./utils/song";
 
 /**
  * Initializing a Vue app instance so we can use things like Pinia.
@@ -36,39 +31,54 @@ function configureApp(app: App) {
  * Custom Elements that will be registered in the app
  */
 export const CustomElements = {
-  "hello-world": defineCustomElement(HelloWorld, {
+  "share-poster-modal": defineCustomElement(SharePosterModal, {
     /**
      * Disabling the shadow root DOM so that we can inject styles from the DOM
      */
     shadowRoot: false,
     configureApp,
   }),
-  "modal-example": defineCustomElement(ModalExample, {
-    shadowRoot: false,
-    configureApp,
-  }),
-  "page-helloworld": defineCustomElement(CustomPage, {
-    shadowRoot: false,
-    configureApp,
-  }),
-  "page-components": defineCustomElement(ComponentsShowcase, {
-    shadowRoot: false,
-    configureApp,
-  }),
-  "immersive-layout": defineCustomElement(CustomImmersiveLayout, {
-    shadowRoot: false,
-    configureApp,
-  }),
-  "component-based-modal": defineCustomElement(ComponentBasedModal, {
-    shadowRoot: false,
-    configureApp,
-  }),
 };
+
+/**
+ * Open the poster modal for a raw host song object.
+ * Resolution order (inside the modal): host item -> DOM scrape -> now playing.
+ */
+function openSharePoster(source: unknown) {
+  if (!resolveSongForShare(source)) {
+    void DialogAPI.createAlert(
+      "无法读取这首歌曲的信息。请先播放一首歌，或在歌曲行上右键后重试。",
+      "分享"
+    );
+    return;
+  }
+  const { openDialog, closeDialog, dialogElement } = createModal({
+    escClose: true,
+  });
+  const content = document.createElement(customElementName("share-poster-modal"));
+  // Pass the raw item through as a property; the modal normalizes + enriches via v3.
+  (content as unknown as { source: unknown }).source = source;
+  dialogElement.appendChild(content);
+  // Close on backdrop click for convenience (keep escClose too).
+  dialogElement.addEventListener("click", (e) => {
+    if (e.target === dialogElement) closeDialog();
+  });
+  openDialog();
+}
+
+/** Fallback source: the currently playing item (immersive / top button). */
+function nowPlayingSource(): unknown {
+  try {
+    return AppleMusic.nowPlayingItem ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Defining the plugin context
  */
-const { plugin, setupConfig, customElementName, goToPage, useCPlugin } =
+const { plugin, setupConfig, customElementName, useCPlugin } =
   definePluginContext({
     ...PluginConfig,
     CustomElements,
@@ -81,101 +91,50 @@ const { plugin, setupConfig, customElementName, goToPage, useCPlugin } =
         customElements.define(customElementName(_key), value);
       }
 
-      // Explicitly defining our settings element here to avoid issues with module load order
-      customElements.define(
-        customElementName("settings"),
-        defineCustomElement(MySettings, {
-          shadowRoot: false,
-          configureApp,
-        })
-      );
+      // Track the right-clicked row so the modal can scrape song info
+      // even when the host passes a MenuItem descriptor instead of song data.
+      armMenuAnchorTracking();
 
-      /**
-       * Defining our custom settings element
-       */
-      this.SettingsElement = customElementName("settings");
-
-      addImmersiveLayout({
-        name: "My layout",
-        identifier: "my-layout",
-        component: customElementName("immersive-layout"),
-        type: "normal",
-      });
-
-      // Here we add a new entry to the main menu
-      addMainMenuEntry({
-        label: "Go to my page",
-        onClick() {
-          goToPage({
-            name: "page-helloworld",
-          });
-        },
-      });
-
-      addMainMenuEntry({
-        label: "Modal example",
-        onClick() {
-          const { closeDialog, openDialog, dialogElement } = createModal({
-            escClose: true,
-          });
-          const content = document.createElement(
-            customElementName("modal-example")
-          );
-          // @ts-ignore
-          content._props.closeFn = closeDialog;
-          dialogElement.appendChild(content);
-          openDialog();
-        },
-      });
-
-      addImmersiveMenuEntry({
-        label: "Go to my page",
-        onClick() {
-          goToPage({
-            name: "page-helloworld",
-          });
-        },
-      });
-
-      addMainMenuEntry({
-        label: "Go to Components Showcase",
-        onClick() {
-          goToPage({
-            name: "page-components",
-          });
-        },
-      });
-
-      // Here we add a custom button to the top right of the chrome
-      addCustomButton({
-        element: "♥",
-        location: "chrome-top/right",
-        title: "Click me!",
-        menuElement: customElementName("hello-world"),
-      });
-
-      const audio = useCiderAudio();
-      audio.subscribe("ready", () => {
-        console.log("CiderAudio is ready!", audio.context);
-      });
-
+      // 1) Media item context menu (right-click a song) — primary entry.
       addMediaItemContextMenuEntry({
-        label: "Send to plugin",
+        label: "分享歌曲海报",
         onClick(item) {
-          console.log("Got this item", item);
+          openSharePoster(item ?? nowPlayingSource());
+        },
+      });
+
+      // 2) Immersive player menu — shares the current song.
+      addImmersiveMenuEntry({
+        label: "分享歌曲海报",
+        onClick() {
+          openSharePoster(nowPlayingSource());
+        },
+      });
+
+      // 3) Main menu — shares the current song.
+      addMainMenuEntry({
+        label: "分享歌曲海报",
+        onClick() {
+          openSharePoster(nowPlayingSource());
+        },
+      });
+
+      // 4) Top chrome button — quick access to the current song.
+      addCustomButton({
+        element: "▦",
+        location: "chrome-top/right",
+        title: "分享歌曲海报",
+        onClick() {
+          openSharePoster(nowPlayingSource());
         },
       });
     },
   });
 
 /**
- * Some boilerplate code for our own configuration
+ * No user-facing settings (zero-config per spec).
  */
-export const cfg = setupConfig({
-  favoriteColor: <"red" | "green" | "blue">"blue",
-  count: <number>0,
-  booleanOption: <boolean>false,
-});
+export const cfg = setupConfig({});
 
 export function useConfig() {
   return cfg.value;
@@ -184,7 +143,7 @@ export function useConfig() {
 /**
  * Exporting the plugin and functions
  */
-export { setupConfig, customElementName, goToPage, useCPlugin };
+export { setupConfig, customElementName, useCPlugin };
 
 /**
  * Exporting the plugin, Cider will use this to load the plugin
