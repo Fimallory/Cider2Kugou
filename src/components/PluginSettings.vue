@@ -47,7 +47,7 @@ async function verify(): Promise<void> {
       spellcheck="false"
       placeholder="t=...; KugooID=...; mid=...; dfid=...; a_id=...;"
     />
-    <button class="c-btn primary full-width" @click="verify" :disabled="checkState === 'working'">
+    <button class="kg-btn" @click="verify" :disabled="checkState === 'working'">
       {{ checkState === "working" ? "验证中…" : checkState === "ok" ? "✓ 有效" : checkState === "fail" ? "✗ 重新验证" : "验证 Cookie" }}
     </button>
     <div v-if="checkNote" class="kg-note">{{ checkNote }}</div>
@@ -85,15 +85,33 @@ share-poster-settings {
 }
 .kg-cookie {
   width: 100%;
+  min-height: 88px;
   font-family: monospace;
   font-size: 11px;
   word-break: break-all;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 8px;
 }
 .kg-note {
   font-size: 12px;
   opacity: 0.7;
 }
-.full-width {
+.kg-btn {
   width: 100%;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: #e94f51;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.kg-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 </style>
