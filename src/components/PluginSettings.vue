@@ -54,11 +54,34 @@ async function verify(): Promise<void> {
   </div>
 </template>
 
+<style>
+/* Non-scoped: the host custom element defaults to `display: inline`,
+   which is a known source of invisible-but-in-DOM rendering for
+   block/flex children. Force block layout at the host level. */
+share-poster-settings {
+  display: block;
+  width: 100%;
+  min-height: 200px;
+  color: rgba(255, 255, 255, 0.85);
+}
+</style>
+
 <style scoped>
 .kg-settings {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  color: rgba(255, 255, 255, 0.85);
+}
+.kg-settings .shelf-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+.kg-settings .text-caption {
+  font-size: 12px;
+  opacity: 0.7;
+  line-height: 1.6;
 }
 .kg-cookie {
   width: 100%;
