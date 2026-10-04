@@ -19,7 +19,7 @@ import {
   AUTO_MATCH_THRESHOLD,
   type KugouCandidate,
 } from "../utils/kugou";
-import { fetchEncodeId } from "../utils/shortlink";
+import { fetchEncodeId, hasKugouCookie } from "../utils/shortlink";
 import { saveConfig } from "@ciderapp/pluginkit";
 import { useConfig } from "../main";
 
@@ -50,7 +50,7 @@ const cookieOpen = ref(false);
 const cookieDraft = ref("");
 const cookieState = ref<"idle" | "working" | "ok" | "fail">("idle");
 const cookieNote = ref("");
-const hasCookie = computed(() => Boolean(String(cfg.kugouCookie ?? "").trim()));
+const hasCookie = computed(() => hasKugouCookie());
 
 function toggleCookie(): void {
   cookieOpen.value = !cookieOpen.value;

@@ -6,10 +6,10 @@ import { useConfig } from "../main";
  * songinfo API (Meting `kugou_url_new` flow).
  *
  * No `Cookie` request header is set on purpose: browsers forbid it, and the
- * API accepts the login identity purely as signed URL params + the Cider
- * cookies it already sends for kugou.com. The signature key is public
- * (from Meting). No secret of the user's is embedded — the cookie comes
- * from the plugin settings the user pastes in.
+ * API accepts the login identity purely as signed URL params. The signature
+ * key is public (from Meting). The login cookie itself comes from the local
+ * git-ignored `.env.local` (`VITE_KUGOU_COOKIE`), with the plugin-config
+ * value as an optional override — it is never committed to the repo.
  *
  * Never throws; returns "" on any failure (caller falls back to the
  * generic H5 page). A bad/expired cookie just yields "" → silent fallback.
@@ -17,6 +17,25 @@ import { useConfig } from "../main";
 
 const SIGN_KEY = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt";
 const TIMEOUT_MS = 10_000;
+
+/**
+ * KuGou login cookie, loaded from the local, git-ignored `.env.local`
+ * (`VITE_KUGOU_COOKIE`). Never committed: the repo stays credential-free,
+ * while a local build inlines it into the (also git-ignored) dist bundle.
+ */
+const ENV_KUGOU_COOKIE = String(
+  import.meta.env.VITE_KUGOU_COOKIE ?? ""
+).trim();
+
+/** Whether any Cookie source is available (env / plugin config). */
+export function hasKugouCookie(): boolean {
+  if (ENV_KUGOU_COOKIE) return true;
+  try {
+    return Boolean(String(useConfig().kugouCookie ?? "").trim());
+  } catch {
+    return false;
+  }
+}
 
 interface CookieParts {
   t: string;
@@ -74,6 +93,7 @@ export async function fetchEncodeId(
       cookie = "";
     }
   }
+  if (!cookie) cookie = ENV_KUGOU_COOKIE;
   const parts = parseCookie(cookie);
   if (!parts) return "";
   try {
