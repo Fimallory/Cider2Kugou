@@ -83,21 +83,9 @@ async function saveAndVerifyCookie(): Promise<void> {
   if (code) {
     cookieState.value = "ok";
     cookieNote.value = `有效，短码示例：${code}`;
-    // Upgrade the current poster to the short link when possible.
-    if (picked.value && lastSong && !picked.value.encodeId) {
-      status.value = "working";
-      try {
-        await resolveShortLink(picked.value);
-        const canvas = await renderPoster(lastSong, {
-          qrText: qrTextFor(picked.value),
-          seed: lastSeed,
-        });
-        await bakePreview(canvas);
-        status.value = "done";
-      } catch {
-        status.value = "done";
-      }
-    }
+    // Cookie now valid: always re-render the current poster so the QR
+    // picks up the short link (even if it previously fell back to H5).
+    await refreshPosterQuiet();
   } else {
     cookieState.value = "fail";
     cookieNote.value = "无效或已过期，请重新登录后复制";
@@ -158,6 +146,24 @@ async function resolveShortLink(c: KugouCandidate): Promise<string> {
   const code = await fetchEncodeId(c.hash);
   if (code) c.encodeId = code;
   return code;
+}
+
+/** Quiet re-render of the current poster (same flow seed, fresh QR). */
+async function refreshPosterQuiet(): Promise<void> {
+  if (!lastSong) return;
+  copyState.value = "idle";
+  status.value = "working";
+  try {
+    if (picked.value) await resolveShortLink(picked.value);
+    const canvas = await renderPoster(lastSong, {
+      qrText: qrTextFor(picked.value),
+      seed: lastSeed,
+    });
+    await bakePreview(canvas);
+    status.value = "done";
+  } catch {
+    status.value = previewUrl.value ? "done" : "error";
+  }
 }
 
 async function loadKugou(song: SongInfo): Promise<void> {
@@ -235,20 +241,7 @@ async function select(c: KugouCandidate): Promise<void> {
   kgPhase.value = "matched";
   kgLine.value = `已匹配：${c.songName} — ${c.singerName}（${pct(c.score)}）`;
   listOpen.value = false;
-  copyState.value = "idle";
-  if (!lastSong) return;
-  status.value = "working";
-  try {
-    await resolveShortLink(c);
-    const canvas = await renderPoster(lastSong, {
-      qrText: qrTextFor(c),
-      seed: lastSeed,
-    });
-    await bakePreview(canvas);
-    status.value = "done";
-  } catch {
-    status.value = "error";
-  }
+  await refreshPosterQuiet();
 }
 
 async function copy(): Promise<void> {
@@ -328,7 +321,7 @@ generate();
           @click="toggleCookie"
           :disabled="status === 'working'"
         >
-          {{ cookieOpen ? "收起短链 Cookie" : "填短链 Cookie（二维码换官方短链）" }}
+          {{ cookieOpen ? "收起短链 Cookie" : "填短链 Cookie" }}
         </button>
       </div>
       <div v-if="cookieOpen" class="kg-cookie-box">
