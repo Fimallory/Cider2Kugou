@@ -15,10 +15,10 @@
 export interface KugouCandidate {
   hash: string;
   albumId: string;
-  /** 数字音频 id（v2 MixSongID/ID，v3 album_audio_id），短链与 H5 传歌用。 */
+  /** 数字音频 id（v2 MixSongID/ID，v3 album_audio_id），chain 与 H5 传歌用。 */
   albumAudioId: string;
-  /** mixsong 短码（encode_album_audio_id，登录态 songinfo 换得），无则回退。 */
-  encodeId: string;
+  /** chain 短码（tservice 免 Cookie 换得），无则回退。 */
+  chainId: string;
   songName: string;
   singerName: string;
   albumName: string;
@@ -95,7 +95,7 @@ function fromV2(lists: V2Item[], source: string): KugouCandidate[] {
       hash,
       albumId,
       albumAudioId: String(it.MixSongID ?? it.ID ?? "").trim(),
-      encodeId: "",
+      chainId: "",
       songName: String(it.SongName ?? ""),
       singerName: String(it.SingerName ?? ""),
       albumName: String(it.AlbumName ?? ""),
@@ -117,7 +117,7 @@ function fromV3(info: V3Item[], source: string): KugouCandidate[] {
       hash,
       albumId,
       albumAudioId: String(it.album_audio_id ?? it.audio_id ?? "").trim(),
-      encodeId: "",
+      chainId: "",
       songName: String(it.songname ?? ""),
       singerName: String(it.singername ?? ""),
       albumName: String(it.album_name ?? ""),
@@ -291,22 +291,22 @@ export function rankKugou(
 export const AUTO_MATCH_THRESHOLD = 0.82;
 
 // ---------------------------------------------------------------------------
-// Official short-link share URL builder (QR payload; no launch/copy UI).
+// Official chain share URL builder (QR payload; no launch/copy UI).
 //
 // Phones open the QR with any scanner (system camera, QQ, WeChat): a plain
 // https URL always opens, then the official page's own JS (open-kugou-app)
 // wakes the KuGou app when installed, download page when not.
 //
-// Primary: `https://www.kugou.com/mixsong/<encode>.html` — the official
-// mobile share page. `<encode>` is `encode_album_audio_id` from the
-// login-state songinfo API (verified 200 + song_info, 2026-10-03).
-// Fallback (no cookie/encode): `m.kugou.com/share/song.html?hash=..` —
+// Primary: `https://m.kugou.com/share/song.html?chain=<code>` — the official
+// short link, resolved cookie-free via `tservice.kugou.com/app/`
+// (`MD5(UPPER(hash) + "kgclientshare")`, reversed from the Web share flow).
+// Fallback (chain unresolved): `m.kugou.com/share/song.html?hash=..` —
 // opens the generic H5 shell without song data.
 // ---------------------------------------------------------------------------
 
-/** mixsong 短链（官方分享页，需 encode_album_audio_id）。 */
-export function mixsongUrl(encodeId: string): string {
-  return `https://www.kugou.com/mixsong/${encodeId}.html`;
+/** chain 短链（官方分享页，免 Cookie）。 */
+export function chainUrl(chainId: string): string {
+  return `https://m.kugou.com/share/song.html?chain=${chainId}`;
 }
 
 /** 通用 H5 页（无短链时的回退，无歌曲数据但页面可开）。 */

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from "vue";
+import { ref, onUnmounted } from "vue";
 import type { SongInfo } from "../utils/song";
 import { normalizeSong, resolveSongForShare } from "../utils/song";
 import { fetchSongDetail } from "../utils/artwork";
@@ -14,14 +14,12 @@ import {
 import {
   searchKugou,
   rankKugou,
-  mixsongUrl,
+  chainUrl,
   shareUrl,
   AUTO_MATCH_THRESHOLD,
   type KugouCandidate,
 } from "../utils/kugou";
-import { fetchEncodeId, hasKugouCookie } from "../utils/shortlink";
-import { saveConfig } from "@ciderapp/pluginkit";
-import { useConfig } from "../main";
+import { fetchChain } from "../utils/shortlink";
 
 const props = defineProps<{
   /** Raw host item (right-click target) or now-playing object. */
@@ -42,57 +40,6 @@ const listOpen = ref(false);
 // Copy button feedback: idle -> ok (✓, auto-revert 0.5s) / fail (✗, sticky).
 const copyState = ref<"idle" | "ok" | "fail">("idle");
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
-
-// Short-link Cookie lives here too (settings page is host-rendered and
-// may stay blank): shown only while no Cookie is saved; hidden once set.
-const cfg = useConfig();
-const cookieOpen = ref(false);
-const cookieDraft = ref("");
-const cookieState = ref<"idle" | "working" | "ok" | "fail">("idle");
-const cookieNote = ref("");
-const hasCookie = computed(() => hasKugouCookie());
-
-function toggleCookie(): void {
-  cookieOpen.value = !cookieOpen.value;
-  if (cookieOpen.value) {
-    cookieDraft.value = String(cfg.kugouCookie ?? "");
-    cookieState.value = "idle";
-    cookieNote.value = "";
-  }
-}
-
-async function saveAndVerifyCookie(): Promise<void> {
-  const cookie = cookieDraft.value.trim();
-  if (!cookie) {
-    cookieState.value = "fail";
-    cookieNote.value = "请先粘贴 Cookie";
-    return;
-  }
-  cookieState.value = "working";
-  cookieNote.value = "正在用已知歌曲验证…";
-  // Well-known track: G.E.M. 邓紫棋 - 喜欢你 (expect encode gr4tu0a).
-  // Verify FIRST: only a valid Cookie is written to config (and hides the entry).
-  const code = await fetchEncodeId(
-    "426d6bc62a73df288f55cb3fca8d2a62",
-    cookie
-  );
-  if (code) {
-    cfg.kugouCookie = cookie;
-    try {
-      await saveConfig();
-    } catch {
-      // persist failure is non-fatal: keep it in memory for this session
-    }
-    cookieState.value = "ok";
-    cookieNote.value = `有效，短码示例：${code}`;
-    // Cookie now valid: always re-render the current poster so the QR
-    // picks up the short link (even if it previously fell back to H5).
-    await refreshPosterQuiet();
-  } else {
-    cookieState.value = "fail";
-    cookieNote.value = "无效或已过期，请重新登录后复制";
-  }
-}
 
 let lastBlob: Blob | null = null;
 let lastSong: SongInfo | null = null;
@@ -135,18 +82,23 @@ function fmtDur(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-/** picked candidate -> QR text. Short mixsong link when resolved, else generic H5. */
+/** picked candidate -> QR text. Short chain link when resolved, else generic H5. */
 function qrTextFor(c: KugouCandidate | null): string {
   if (!c) return "";
-  if (c.encodeId) return mixsongUrl(c.encodeId);
+  if (c.chainId) return chainUrl(c.chainId);
   return shareUrl(c);
 }
 
-/** Resolve the mixsong short code for the picked candidate (silent fallback). */
+/** Resolve the chain short code for the picked candidate (silent fallback). */
 async function resolveShortLink(c: KugouCandidate): Promise<string> {
-  if (!c || c.encodeId) return c?.encodeId ?? "";
-  const code = await fetchEncodeId(c.hash);
-  if (code) c.encodeId = code;
+  if (!c || c.chainId) return c?.chainId ?? "";
+  const code = await fetchChain({
+    hash: c.hash,
+    albumId: c.albumId,
+    albumAudioId: c.albumAudioId,
+    filename: [c.singerName, c.songName].filter(Boolean).join(" - "),
+  });
+  if (code) c.chainId = code;
   return code;
 }
 
@@ -317,40 +269,6 @@ generate();
           </div>
         </button>
       </div>
-      <div v-if="!hasCookie" class="kg-cookie-toggle">
-        <button
-          class="c-btn flat"
-          @click="toggleCookie"
-          :disabled="status === 'working'"
-        >
-          {{ cookieOpen ? "收起短链 Cookie" : "填短链 Cookie" }}
-        </button>
-      </div>
-      <div v-if="cookieOpen" class="kg-cookie-box">
-        <textarea
-          v-model="cookieDraft"
-          class="kg-cookie-input"
-          rows="3"
-          spellcheck="false"
-          placeholder="t=...; KugooID=...; mid=...; dfid=...; a_id=...;"
-        />
-        <button
-          class="c-btn"
-          @click="saveAndVerifyCookie"
-          :disabled="cookieState === 'working'"
-        >
-          {{
-            cookieState === "working"
-              ? "验证中…"
-              : cookieState === "ok"
-                ? "✓ 有效"
-                : cookieState === "fail"
-                  ? "✗ 重新验证"
-                  : "保存并验证"
-          }}
-        </button>
-        <div v-if="cookieNote" class="kg-cookie-note">{{ cookieNote }}</div>
-      </div>
     </div>
     <div class="sp-actions">
       <button class="c-btn" @click="generate" :disabled="status === 'working'">重新生成</button>
@@ -485,26 +403,5 @@ generate();
 }
 .sp-actions .c-btn {
   flex: 1;
-}
-.kg-cookie-toggle .c-btn.flat {
-  width: 100%;
-  background: transparent;
-  border: 1px dashed rgba(255, 255, 255, 0.18);
-  margin-top: 2px;
-}
-.kg-cookie-box {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.kg-cookie-input {
-  width: 100%;
-  font-family: monospace;
-  font-size: 11px;
-  word-break: break-all;
-}
-.kg-cookie-note {
-  font-size: 11px;
-  opacity: 0.7;
 }
 </style>

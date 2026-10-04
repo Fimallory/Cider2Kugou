@@ -140,16 +140,14 @@ const { plugin, setupConfig, customElementName, useCPlugin } =
   });
 
 /**
- * Plugin settings. `kugouCookie` is the user's own login cookie pasted in
- * the settings page — persisted by Cider, never committed to git.
+ * Plugin settings. No user inputs: chain short links are cookie-free
+ * (kept as an empty shell so the host settings entry still renders).
  */
 export interface PluginSettings {
-  kugouCookie: string;
+  _placeholder?: string;
 }
 
-export const cfg = setupConfig<PluginSettings>({
-  kugouCookie: "",
-});
+export const cfg = setupConfig<PluginSettings>({});
 
 export function useConfig(): PluginSettings {
   return cfg.value;

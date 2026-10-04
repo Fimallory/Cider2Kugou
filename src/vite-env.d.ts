@@ -2,8 +2,7 @@
 /// <reference types="@ciderapp/pluginkit" />
 
 interface ImportMetaEnv {
-  /** Local KuGou login cookie (git-ignored .env.local). */
-  readonly VITE_KUGOU_COOKIE?: string;
+  // No plugin env vars (chain short links are cookie-free).
 }
 
 interface ImportMeta {

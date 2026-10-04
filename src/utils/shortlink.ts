@@ -1,71 +1,20 @@
 import { md5Hex } from "./md5";
-import { useConfig } from "../main";
 
 /**
- * Exchange `encode_album_audio_id` (mixsong short code) via the login-state
- * songinfo API (Meting `kugou_url_new` flow).
+ * Resolve the official `?chain=` short code via `tservice.kugou.com/app/`
+ * (Web-end share flow, reversed from `hashQueryShortUrl`):
+ * `md5 = MD5(UPPER(hash) + "kgclientshare")`.
  *
- * No `Cookie` request header is set on purpose: browsers forbid it, and the
- * API accepts the login identity purely as signed URL params. The signature
- * key is public (from Meting). The login cookie itself comes from the local
- * git-ignored `.env.local` (`VITE_KUGOU_COOKIE`), with the plugin-config
- * value as an optional override — it is never committed to the repo.
- *
- * Never throws; returns "" on any failure (caller falls back to the
- * generic H5 page). A bad/expired cookie just yields "" → silent fallback.
+ * No Cookie needed, CORS `*` — plain browser fetch works.
+ * Never throws; returns "" on any failure (caller falls back to H5).
  */
 
-const SIGN_KEY = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt";
 const TIMEOUT_MS = 10_000;
-
-/**
- * KuGou login cookie, loaded from the local, git-ignored `.env.local`
- * (`VITE_KUGOU_COOKIE`). Never committed: the repo stays credential-free,
- * while a local build inlines it into the (also git-ignored) dist bundle.
- */
-const ENV_KUGOU_COOKIE = String(
-  import.meta.env.VITE_KUGOU_COOKIE ?? ""
-).trim();
-
-/** Whether any Cookie source is available (env / plugin config). */
-export function hasKugouCookie(): boolean {
-  if (ENV_KUGOU_COOKIE) return true;
-  try {
-    return Boolean(String(useConfig().kugouCookie ?? "").trim());
-  } catch {
-    return false;
-  }
-}
-
-interface CookieParts {
-  t: string;
-  kugouId: string;
-  mid: string;
-  dfid: string;
-}
-
-function parseCookie(cookie: string): CookieParts | null {
-  const map = new Map<string, string>();
-  for (const pair of String(cookie ?? "").split(";")) {
-    const idx = pair.indexOf("=");
-    if (idx <= 0) continue;
-    map.set(pair.slice(0, idx).trim(), pair.slice(idx + 1).trim());
-  }
-  const t = map.get("t") ?? "";
-  const kugouId = map.get("KugooID") ?? "";
-  if (!t || !kugouId) return null;
-  return {
-    t,
-    kugouId,
-    mid: map.get("mid") ?? map.get("kg_mid") ?? "",
-    dfid: map.get("dfid") ?? map.get("kg_dfid") ?? "",
-  };
-}
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("shortlink timeout")), ms);
+    timer = setTimeout(() => reject(new Error("chain timeout")), ms);
   });
   return Promise.race([
     p.finally(() => {
@@ -75,64 +24,59 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
+/** Extract `chain` from `https://m.kugou.com/share/song.html?chain=XXX`. */
+function extractChain(data: string): string {
+  const m = String(data ?? "").match(/[?&]chain=([A-Za-z0-9]+)/);
+  const code = (m?.[1] ?? "").trim();
+  return /^[A-Za-z0-9]{4,16}$/.test(code) ? code : "";
+}
+
+export interface ChainInput {
+  hash: string;
+  albumId: string;
+  albumAudioId: string;
+  /** `歌手 - 歌名`，对应 Web 端 `audio_name`。 */
+  filename: string;
+}
+
 /**
- * Resolve the mixsong short code for a 32-char hash.
- * Prefer `cfg` from plugin settings; `cookieOverride` is for tests.
+ * Fetch the `?chain=` short code for a 32-char hash.
+ * `filename` mismatch does not block issuing; hash is the key.
  */
-export async function fetchEncodeId(
-  hash: string,
-  cookieOverride = ""
-): Promise<string> {
-  const clean = String(hash ?? "").trim().toLowerCase();
-  if (!/^[a-f0-9]{32}$/.test(clean)) return "";
-  let cookie = cookieOverride;
-  if (!cookie) {
-    try {
-      cookie = String(useConfig().kugouCookie ?? "");
-    } catch {
-      cookie = "";
-    }
-  }
-  if (!cookie) cookie = ENV_KUGOU_COOKIE;
-  const parts = parseCookie(cookie);
-  if (!parts) return "";
+export async function fetchChain(input: ChainInput): Promise<string> {
+  const hash = String(input?.hash ?? "").trim();
+  if (!/^[a-fA-F0-9]{32}$/.test(hash)) return "";
+  const upper = hash.toUpperCase();
+  const albumId = String(input?.albumId ?? "").trim() || "0";
+  const albumAudioId = String(input?.albumAudioId ?? "").trim();
+  const filename = String(input?.filename ?? "").trim();
+  const md5 = md5Hex(upper + "kgclientshare");
+  const q = new URLSearchParams({
+    cmid: "1",
+    filename,
+    hash: upper,
+    album_id: albumId,
+    album_audio_id: albumAudioId,
+    is_short: "1",
+    md5,
+    chl: "qq",
+    codes: "1",
+    from: "",
+  });
   try {
-    const params: Record<string, string> = {
-      srcappid: "2919",
-      clientver: "20000",
-      clienttime: String(Date.now()),
-      mid: parts.mid,
-      uuid: parts.mid,
-      dfid: parts.dfid,
-      appid: "1014",
-      platid: "4",
-      hash: clean,
-      token: parts.t,
-      userid: parts.kugouId,
-    };
-    const sorted = Object.entries(params)
-      .map(([k, v]) => `${k}=${v}`)
-      .join("&")
-      .split("&")
-      .sort()
-      .join("");
-    const signature = md5Hex(`${SIGN_KEY}${sorted}${SIGN_KEY}`);
-    const qs = Object.entries(params)
-      .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
-      .join("&");
     const res = await withTimeout(
-      fetch(
-        `https://wwwapi.kugou.com/play/songinfo?${qs}&signature=${signature}`,
-        { credentials: "omit" }
-      ),
+      fetch(`https://tservice.kugou.com/app/?${q.toString()}`, {
+        credentials: "omit",
+        referrer: "https://www.kugou.com/",
+      }),
       TIMEOUT_MS
     );
     if (!res.ok) return "";
-    const json = (await res.json()) as {
-      data?: { encode_album_audio_id?: unknown };
-    };
-    const code = String(json?.data?.encode_album_audio_id ?? "").trim();
-    return /^[A-Za-z0-9]{4,12}$/.test(code) ? code : "";
+    const text = (await res.text()).trim();
+    // No `callback` param → pure JSON body.
+    const json = JSON.parse(text) as { status?: unknown; data?: unknown };
+    if (json?.status !== 1) return "";
+    return extractChain(String(json?.data ?? ""));
   } catch {
     return "";
   }

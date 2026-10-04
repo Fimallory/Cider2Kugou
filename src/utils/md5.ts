@@ -1,5 +1,5 @@
 /**
- * Minimal MD5 (RFC 1321) for the KuGou songinfo signature.
+ * Minimal MD5 (RFC 1321) for the KuGou chain signature.
  * Browser `crypto.subtle` does not offer MD5, and the plugin bundle has no
  * node:crypto — so this ships its own. Verified against node:crypto below.
  */

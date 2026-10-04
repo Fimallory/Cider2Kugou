@@ -2,8 +2,9 @@ import qrcode from "qrcode-generator";
 
 /**
  * Visible QR painted at the poster's bottom-right corner.
- * Content is the official mixsong short link when the login cookie resolves
- * it (`www.kugou.com/mixsong/<encode>.html`), else the generic H5 share
+ * Content is the official chain short link
+ * (`m.kugou.com/share/song.html?chain=...`, resolved cookie-free),
+ * else the generic H5 share
  * page: any phone scanner (camera, QQ, WeChat) opens it, then the page's
  * own JS wakes the KuGou app when installed (download page when not).
  * White box background keeps it decodable over the busy flow backdrop.
