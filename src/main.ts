@@ -38,10 +38,6 @@ export const CustomElements = {
     shadowRoot: false,
     configureApp,
   }),
-  settings: defineCustomElement(PluginSettings, {
-    shadowRoot: false,
-    configureApp,
-  }),
 };
 
 /**
@@ -80,7 +76,6 @@ const { plugin, setupConfig, customElementName, useCPlugin } =
   definePluginContext({
     ...PluginConfig,
     CustomElements,
-    SettingsElement: `${PluginConfig.ce_prefix}-settings`,
     setup() {
       /**
        * Registering the custom elements in the app
@@ -89,6 +84,20 @@ const { plugin, setupConfig, customElementName, useCPlugin } =
         const _key = key as keyof typeof CustomElements;
         customElements.define(customElementName(_key), value);
       }
+
+      // Explicitly defining our settings element here to avoid issues with module load order
+      customElements.define(
+        customElementName("settings"),
+        defineCustomElement(PluginSettings, {
+          shadowRoot: false,
+          configureApp,
+        })
+      );
+
+      /**
+       * Defining our custom settings element
+       */
+      this.SettingsElement = customElementName("settings");
 
       // Track the right-clicked row so the modal can scrape song info
       // even when the host passes a MenuItem descriptor instead of song data.
