@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onUnmounted } from "vue";
+import { ref, computed, onUnmounted } from "vue";
 import type { SongInfo } from "../utils/song";
 import { normalizeSong, resolveSongForShare } from "../utils/song";
 import { fetchSongDetail } from "../utils/artwork";
@@ -44,12 +44,13 @@ const copyState = ref<"idle" | "ok" | "fail">("idle");
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
 // Short-link Cookie lives here too (settings page is host-rendered and
-// may stay blank): collapsible input, saved to plugin config.
+// may stay blank): shown only while no Cookie is saved; hidden once set.
 const cfg = useConfig();
 const cookieOpen = ref(false);
 const cookieDraft = ref("");
 const cookieState = ref<"idle" | "working" | "ok" | "fail">("idle");
 const cookieNote = ref("");
+const hasCookie = computed(() => Boolean(String(cfg.kugouCookie ?? "").trim()));
 
 function toggleCookie(): void {
   cookieOpen.value = !cookieOpen.value;
@@ -69,18 +70,19 @@ async function saveAndVerifyCookie(): Promise<void> {
   }
   cookieState.value = "working";
   cookieNote.value = "正在用已知歌曲验证…";
-  cfg.kugouCookie = cookie;
-  try {
-    await saveConfig();
-  } catch {
-    // persist failure is non-fatal: keep it in memory for this session
-  }
   // Well-known track: G.E.M. 邓紫棋 - 喜欢你 (expect encode gr4tu0a).
+  // Verify FIRST: only a valid Cookie is written to config (and hides the entry).
   const code = await fetchEncodeId(
     "426d6bc62a73df288f55cb3fca8d2a62",
     cookie
   );
   if (code) {
+    cfg.kugouCookie = cookie;
+    try {
+      await saveConfig();
+    } catch {
+      // persist failure is non-fatal: keep it in memory for this session
+    }
     cookieState.value = "ok";
     cookieNote.value = `有效，短码示例：${code}`;
     // Cookie now valid: always re-render the current poster so the QR
@@ -315,7 +317,7 @@ generate();
           </div>
         </button>
       </div>
-      <div class="kg-cookie-toggle">
+      <div v-if="!hasCookie" class="kg-cookie-toggle">
         <button
           class="c-btn flat"
           @click="toggleCookie"
