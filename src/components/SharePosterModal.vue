@@ -20,6 +20,8 @@ import {
   type KugouCandidate,
 } from "../utils/kugou";
 import { fetchEncodeId } from "../utils/shortlink";
+import { saveConfig } from "@ciderapp/pluginkit";
+import { useConfig } from "../main";
 
 const props = defineProps<{
   /** Raw host item (right-click target) or now-playing object. */
@@ -40,6 +42,67 @@ const listOpen = ref(false);
 // Copy button feedback: idle -> ok (✓, auto-revert 0.5s) / fail (✗, sticky).
 const copyState = ref<"idle" | "ok" | "fail">("idle");
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
+
+// Short-link Cookie lives here too (settings page is host-rendered and
+// may stay blank): collapsible input, saved to plugin config.
+const cfg = useConfig();
+const cookieOpen = ref(false);
+const cookieDraft = ref("");
+const cookieState = ref<"idle" | "working" | "ok" | "fail">("idle");
+const cookieNote = ref("");
+
+function toggleCookie(): void {
+  cookieOpen.value = !cookieOpen.value;
+  if (cookieOpen.value) {
+    cookieDraft.value = String(cfg.kugouCookie ?? "");
+    cookieState.value = "idle";
+    cookieNote.value = "";
+  }
+}
+
+async function saveAndVerifyCookie(): Promise<void> {
+  const cookie = cookieDraft.value.trim();
+  if (!cookie) {
+    cookieState.value = "fail";
+    cookieNote.value = "请先粘贴 Cookie";
+    return;
+  }
+  cookieState.value = "working";
+  cookieNote.value = "正在用已知歌曲验证…";
+  cfg.kugouCookie = cookie;
+  try {
+    await saveConfig();
+  } catch {
+    // persist failure is non-fatal: keep it in memory for this session
+  }
+  // Well-known track: G.E.M. 邓紫棋 - 喜欢你 (expect encode gr4tu0a).
+  const code = await fetchEncodeId(
+    "426d6bc62a73df288f55cb3fca8d2a62",
+    cookie
+  );
+  if (code) {
+    cookieState.value = "ok";
+    cookieNote.value = `有效，短码示例：${code}`;
+    // Upgrade the current poster to the short link when possible.
+    if (picked.value && lastSong && !picked.value.encodeId) {
+      status.value = "working";
+      try {
+        await resolveShortLink(picked.value);
+        const canvas = await renderPoster(lastSong, {
+          qrText: qrTextFor(picked.value),
+          seed: lastSeed,
+        });
+        await bakePreview(canvas);
+        status.value = "done";
+      } catch {
+        status.value = "done";
+      }
+    }
+  } else {
+    cookieState.value = "fail";
+    cookieNote.value = "无效或已过期，请重新登录后复制";
+  }
+}
 
 let lastBlob: Blob | null = null;
 let lastSong: SongInfo | null = null;
@@ -259,6 +322,40 @@ generate();
           </div>
         </button>
       </div>
+      <div class="kg-cookie-toggle">
+        <button
+          class="c-btn flat"
+          @click="toggleCookie"
+          :disabled="status === 'working'"
+        >
+          {{ cookieOpen ? "收起短链 Cookie" : "填短链 Cookie（二维码换官方短链）" }}
+        </button>
+      </div>
+      <div v-if="cookieOpen" class="kg-cookie-box">
+        <textarea
+          v-model="cookieDraft"
+          class="kg-cookie-input"
+          rows="3"
+          spellcheck="false"
+          placeholder="t=...; KugooID=...; mid=...; dfid=...; a_id=...;"
+        />
+        <button
+          class="c-btn"
+          @click="saveAndVerifyCookie"
+          :disabled="cookieState === 'working'"
+        >
+          {{
+            cookieState === "working"
+              ? "验证中…"
+              : cookieState === "ok"
+                ? "✓ 有效"
+                : cookieState === "fail"
+                  ? "✗ 重新验证"
+                  : "保存并验证"
+          }}
+        </button>
+        <div v-if="cookieNote" class="kg-cookie-note">{{ cookieNote }}</div>
+      </div>
     </div>
     <div class="sp-actions">
       <button class="c-btn" @click="generate" :disabled="status === 'working'">重新生成</button>
@@ -393,5 +490,26 @@ generate();
 }
 .sp-actions .c-btn {
   flex: 1;
+}
+.kg-cookie-toggle .c-btn.flat {
+  width: 100%;
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  margin-top: 2px;
+}
+.kg-cookie-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kg-cookie-input {
+  width: 100%;
+  font-family: monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+.kg-cookie-note {
+  font-size: 11px;
+  opacity: 0.7;
 }
 </style>
